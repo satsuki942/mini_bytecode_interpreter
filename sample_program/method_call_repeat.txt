@@ -1,0 +1,45 @@
+DEFINE_CLS NUM # クラス定義
+SET_METHOD NUM SUM 35
+PUSH 1000 # fib(n)のnをpush
+NEW_INSTANCE NUM # 初期値の登録
+PUSH 0
+SET_ATTR VALUE
+NEW_INSTANCE NUM
+PUSH 1
+SET_ATTR VALUE
+SAVE 10 # コピー
+SAVE 9
+SAVE 11
+LOAD 11
+LOAD 11
+PUSH 1      # n == 1を判定
+EQ
+JMP_IF 31   # n == 1ならプログラムを終了
+PUSH -1     # n -= 1をする
+ADD
+NOP # 以下fib(n-1) + fib(n-2)の足し算
+LOAD 9 # 引数に渡す物を複製
+LOAD 10　
+LOAD 9 # メソッドを呼び出すために消費されるレシーバー
+GET_ATTR __cls__
+PUSH SUM
+SAVE 1
+SAVE 0
+CALL
+SAVE 9 # fib(n)をレジスタ9に入れ、10に入っているfib(n-1)とswap
+SWAP 9 10
+JMP 11 # 再帰ポイントにジャンプ
+LOAD 10 # fib(n)の返り値をロード
+HALT
+NOP
+NOP
+GET_ATTR VALUE
+SAVE 3 # 次の計算のために退避
+GET_ATTR VALUE
+LOAD 3
+ADD
+SAVE 3
+NEW_INSTANCE NUM
+LOAD 3
+SET_ATTR VALUE
+RET

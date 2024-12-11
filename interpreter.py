@@ -1,3 +1,5 @@
+import sys
+
 class Stack:
     def __init__(self):
         self.stack = []
@@ -41,6 +43,9 @@ class Register:
             print("required integer from 0 to 15")
             print(f"but given {index}")
             return
+    
+    def __str__(self):
+        return str(self.register)
 
 class ClassTable:
     def __init__(self):
@@ -66,28 +71,55 @@ class ClassTables:
         return self.tables[c_name].search_method(m_name)
 
 class Interpreter:
-    def __init__(self, codes, debug_mode=False):
+    def __init__(self, codes, enable_inline_caching=False, debug_mode=False):
         self.stack = Stack()
         self.register = Register()
         self.codes = codes
         self.class_table = ClassTables()
         self.pc = 0
         self.ret_point = Stack()
+        self.enable_inline_caching = enable_inline_caching
         self.debug_mode = debug_mode
+
+    def inline_caching(self, m_old_address):
+        # codes[pointer] = CALL
+        # ->
+        # LOAD 0
+        # PUSH NUM
+        # EQ
+        # JMP_NIF <>
+        # SET_RET <>
+        # JMP <sumのアドレス>
+        # CALL
+        # 
+        pointer = self.pc - 1
+        # 前処理(メソッドの呼び出しの深さが2以上だと壊れるかも)
+        for code in self.codes:
+            if (code[0] == 'JMP') or (code[0] == 'JMP_IF') or (code[0] == 'JMP_NIF'):
+                if code[1] >= pointer:
+                    code[1] += 6
+            if code[0] == 'SET_METHOD':
+                if code[3] >= pointer:
+                    code[3] += 6
+        # inline cachingによるコード挿入
+        self.codes.insert(pointer, ['JMP', m_old_address+6])
+        self.codes.insert(pointer, ['SET_RET', pointer+7])
+        self.codes.insert(pointer, ['JMP_NIF', pointer+6])
+        self.codes.insert(pointer, ['EQ'])
+        self.codes.insert(pointer, ['LOAD', 0])
+        self.codes.insert(pointer, ['PUSH', 'NUM'])
+        # sys.exit(0)
 
     def interpret(self):
         halt_called = False
         while (not halt_called) and (0 <= self.pc < len(self.codes)):
+            current_pc = self.pc + 1
             code = self.codes[self.pc]
             self.pc += 1
             match code[0]:
                 case 'PUSH': self.stack.push(code[1])
                 case 'POP': self.stack.pop()
                 case 'ADD': self.stack.push(self.stack.pop() + self.stack.pop())
-                case 'SUB': self.stack.push(self.stack.pop() - self.stack.pop())
-                case 'MUL': self.stack.push(self.stack.pop() * self.stack.pop())
-                case 'DIV': self.stack.push(self.stack.pop() / self.stack.pop())
-                case 'MOD': self.stack.push(self.stack.pop() % self.stack.pop())
                 case 'EQ': self.stack.push(self.stack.pop() == self.stack.pop())
                 case 'NEQ': self.stack.push(self.stack.pop() != self.stack.pop())
                 case 'LT': self.stack.push(self.stack.pop() < self.stack.pop())
@@ -99,11 +131,10 @@ class Interpreter:
                 case 'JMP_NIF': 
                     if not self.stack.pop(): 
                         self.pc = code[1]
-                case 'NOP': pass
-                case 'HALT': halt_called = True
                 case 'LOAD': self.stack.push(self.register.load(code[1]))
                 case 'SAVE': self.register.save(code[1], self.stack.pop())
-                case 'PRINT': print(self.stack.pop())
+                case 'NOP': pass
+                case 'HALT': halt_called = True
                 # SuperInstructionの最適化を行ったときに追加されるはずのInstruction
                 # LOAD i > LOAD j > SAVE i > SAVE jがこれに当たる
                 case 'SWAP':
@@ -112,13 +143,22 @@ class Interpreter:
                     self.register.save(code[2], tmp)
                 # インスタンス作成やメソッド呼び出しのために必要なInstruction
                 # クラスおよびそのメソッドは定義済みとする。
+                case 'SET_RET':
+                    self.ret_point.push(code[1])
                 case 'RET': 
                     self.pc = self.ret_point.pop()
                 case 'CALL':
-                    self.register.save(0, self.stack.pop()["__cls__"])
-                    self.register.save(1, code[1])
-                    self.ret_point.push(self.pc)
-                    self.pc = self.class_table.search_method(self.register.load(0), self.register.load(1))
+                    if self.enable_inline_caching:
+                        self.ret_point.push(self.pc + 6)
+                        method_pointer = self.class_table.search_method(self.register.load(0), self.register.load(1))
+
+                        self.inline_caching(method_pointer)
+                        self.pc = method_pointer + 6
+                    else:
+                        self.ret_point.push(self.pc)
+                        # メモリアクセスにかかる時間を表現
+                        for i in range(10):
+                            self.pc = self.class_table.search_method(self.register.load(0), self.register.load(1))
                 case 'NEW_INSTANCE': self.stack.push({"__cls__": code[1]})
                 case 'SET_ATTR':
                     attr = self.stack.pop()
@@ -131,9 +171,15 @@ class Interpreter:
                     self.class_table.def_cls(code[1])
                 case 'SET_METHOD':
                     self.class_table.set_method(code[1], code[2], code[3])
+                # 基本命令セットであるが、あまり使わないもの
+                case 'SUB': self.stack.push(self.stack.pop() - self.stack.pop())
+                case 'MUL': self.stack.push(self.stack.pop() * self.stack.pop())
+                case 'DIV': self.stack.push(self.stack.pop() / self.stack.pop())
+                case 'MOD': self.stack.push(self.stack.pop() % self.stack.pop())
+                case 'PRINT': print(self.stack.pop())
                 case _:
                     print("Undefined Instruction is Called!!!")
             if self.debug_mode:
-                print(f"pc {self.pc}: stack {self.stack}")
+                print(f"pc {current_pc}: {code}\n   stack   :{self.stack}\n   register:{self.register}")
         return
   
