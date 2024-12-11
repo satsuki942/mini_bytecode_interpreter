@@ -1,3 +1,9 @@
+命令セットを絞ったByteCodeインタープリター
+
+命令セット：
+
+コマンド：
+
 fib-program
 ```
 PUSH 10     # fib(n)
